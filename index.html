@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>反射音・音速測定 Ver.6</title>
+<style>
+body{font-family:system-ui,-apple-system,"Yu Gothic","Meiryo",sans-serif;margin:0;background:#f3f5f7;color:#172033}
+main{max-width:1200px;margin:auto;padding:18px}
+h1{font-size:25px;margin:0 0 5px}.lead{color:#5e6878;margin:0 0 14px}
+.panel{background:white;border:1px solid #d4dae3;border-radius:12px;padding:14px;margin:12px 0}
+.row{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+button{font:inherit;font-weight:650;padding:9px 14px;border:1px solid #aeb6c2;background:white;border-radius:8px;cursor:pointer}
+button.primary{background:#1f2937;color:white;border-color:#1f2937}button:disabled{opacity:.4;cursor:not-allowed}
+.info{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin-top:10px}
+.box{background:#f5f7fa;border-radius:8px;padding:9px}.box b{display:block;font-size:12px;color:#667085}.box span{font:15px Consolas,monospace}
+canvas{display:block;width:100%;height:500px;border:1px solid #8f99a8;border-radius:7px;background:#fff;cursor:crosshair}
+input[type=range]{width:min(620px,75vw)}.small{font-size:13px;color:#667085;line-height:1.5}
+.active{background:#e9eef6!important;border-color:#667085!important}.result{background:#eef5ff;border:1px solid #b8d0f0}.big{font-size:20px!important;font-weight:700}.formula{margin-top:9px;font-size:14px;color:#475467}
+
+table{width:100%;border-collapse:collapse;margin-top:10px;font-size:14px}
+th,td{border-bottom:1px solid #e1e5eb;padding:8px;text-align:right}
+th:first-child,td:first-child{text-align:center}
+td:nth-child(2),th:nth-child(2){text-align:center}
+.summary{margin-top:14px}
+</style>
+</head>
+<body><main>
+<h1>反射音・音速測定 Ver.6</h1>
+<p class="lead">Ver.4の波形表示を維持し、直接音Aと反射音Bの時間差から音速まで自動計算します。</p>
+
+<section class="panel">
+<div class="row">
+<button id="record" class="primary">● 録音開始</button>
+<button id="stop" disabled>■ 録音停止</button>
+<button id="reset">リセット</button>
+<strong id="status">待機中</strong>
+</div>
+<div class="info">
+<div class="box"><b>サンプリング周波数</b><span id="sr">—</span></div>
+<div class="box"><b>1 sample</b><span id="sampletime">—</span></div>
+<div class="box"><b>録音時間</b><span id="duration">—</span></div>
+</div>
+</section>
+
+<section class="panel">
+<div class="row">
+<strong>表示時間幅：</strong>
+<button class="window" data-ms="100">100 ms</button>
+<button class="window" data-ms="50">50 ms</button>
+<button class="window" data-ms="20">20 ms</button>
+<button class="window active" data-ms="10">10 ms</button>
+<button class="window" data-ms="5">5 ms</button>
+<button id="peak" class="primary">最大ピークへ</button>
+</div>
+<div class="row" style="margin:10px 0">
+<strong>表示位置：</strong>
+<input id="position" type="range" min="0" max="0" value="0" step="1">
+<span id="rangeText">—</span>
+</div>
+<canvas id="wave"></canvas>
+<p class="small">波形をクリックすると、1回目がA（直接音）、2回目がB（反射音）です。3回目のクリックでAから選び直します。縦の補助線は1 ms間隔です。</p>
+</section>
+
+<section class="panel">
+<div class="row">
+<button id="clear">A・Bを消去</button>
+<label><b>気柱長 L：</b> <input id="L" type="number" value="80.0" min="1" max="200" step="0.1"> cm</label>
+<label><b>気柱温度 t：</b> <input id="T" type="number" value="25.0" step="0.1"> ℃</label>
+</div>
+<div class="info">
+<div class="box"><b>A の時刻</b><span id="A">—</span></div>
+<div class="box"><b>B の時刻</b><span id="B">—</span></div>
+<div class="box"><b>サンプル差</b><span id="samples">—</span></div>
+<div class="box"><b>時間差 Δt</b><span id="delta">—</span></div>
+<div class="box result"><b>測定した音速 v</b><span id="velocity" class="big">—</span></div>
+<div class="box"><b>参考値 331.5 + 0.6t</b><span id="theory">346.5 m/s</span></div>
+<div class="box"><b>参考値との差</b><span id="difference">—</span></div>
+<div class="box"><b>相対差</b><span id="percent">—</span></div>
+</div>
+<div class="formula">計算式：　v = 2L / Δt　（水面までの距離 L を音が往復するとして計算）</div>
+</section>
+
+<section class="panel">
+<h2 style="font-size:19px;margin:0 0 8px">予備実験データ（50・60・70・80 cm × 各3回）</h2>
+<p class="small">A・Bを指定して音速が表示されたら、気柱長を確認して「現在の測定を記録」を押してください。同じ距離は3回まで記録できます。</p>
+<div class="row">
+<button id="saveMeasurement" class="primary">現在の測定を記録</button>
+<button id="undoMeasurement">最後の記録を削除</button>
+<button id="clearMeasurements">12回分を全消去</button>
+<button id="downloadCsv">CSV保存</button>
+<strong id="progress">0 / 12</strong>
+</div>
+<table>
+<thead><tr><th>No.</th><th>L</th><th>回</th><th>温度</th><th>サンプル差</th><th>Δt</th><th>音速</th></tr></thead>
+<tbody id="measurementBody"></tbody>
+</table>
+<div class="summary">
+<h3 style="font-size:16px;margin-bottom:5px">距離ごとの集計</h3>
+<table><thead><tr><th>L</th><th>回数</th><th>平均 Δt</th><th>平均音速</th><th>音速の標準偏差</th></tr></thead>
+<tbody id="summaryBody"></tbody></table>
+</div>
+</section>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const canvas=$("wave"), ctx=canvas.getContext("2d");
+let audioContext=null,stream=null,source=null,processor=null,chunks=[];
+let samples=null,sampleRate=0,viewMs=10,viewStart=0,peakIndex=0,A=null,B=null;
+
+function resize(){
+ const d=window.devicePixelRatio||1,r=canvas.getBoundingClientRect();
+ canvas.width=Math.round(r.width*d); canvas.height=Math.round(500*d);
+ ctx.setTransform(d,0,0,d,0,0); draw();
+}
+window.addEventListener("resize",resize);
+
+async function startRecording(){
+ try{
+  stream=await navigator.mediaDevices.getUserMedia({
+   audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false},video:false
+  });
+  audioContext=new (window.AudioContext||window.webkitAudioContext)();
+  sampleRate=audioContext.sampleRate;
+  source=audioContext.createMediaStreamSource(stream);
+  processor=audioContext.createScriptProcessor(256,1,1);
+  chunks=[];
+  processor.onaudioprocess=e=>chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  source.connect(processor); processor.connect(audioContext.destination);
+  $("sr").textContent=sampleRate.toLocaleString()+" Hz";
+  $("sampletime").textContent=(1000/sampleRate).toFixed(5)+" ms";
+  $("record").disabled=true;$("stop").disabled=false;$("status").textContent="録音中…";
+ }catch(err){alert("マイクを開始できません。\n"+err.message);}
+}
+async function stopRecording(){
+ if(!processor)return;
+ processor.disconnect();source.disconnect();stream.getTracks().forEach(t=>t.stop());
+ await audioContext.close();
+ const total=chunks.reduce((n,a)=>n+a.length,0);
+ samples=new Float32Array(total);let off=0;
+ for(const a of chunks){samples.set(a,off);off+=a.length}
+ let max=0;peakIndex=0;
+ for(let i=0;i<samples.length;i++){const z=Math.abs(samples[i]);if(z>max){max=z;peakIndex=i}}
+ A=B=null;
+ $("duration").textContent=(samples.length/sampleRate).toFixed(3)+" s";
+ centerOnPeak(); updatePosition(); updateMeasure(); draw();
+ $("record").disabled=false;$("stop").disabled=true;$("status").textContent="録音完了";
+ processor=source=stream=audioContext=null;
+}
+function visibleCount(){return Math.max(2,Math.round(sampleRate*viewMs/1000));}
+function centerOnPeak(){
+ if(!samples)return;
+ const n=visibleCount();
+ // Put the largest impulse at ~25% of the screen so an echo 4-5 ms later remains visible.
+ viewStart=Math.round(peakIndex-n*.25);
+ viewStart=Math.max(0,Math.min(Math.max(0,samples.length-n),viewStart));
+}
+function updatePosition(){
+ if(!samples)return;
+ const n=visibleCount(),max=Math.max(0,samples.length-n);
+ $("position").max=max;$("position").value=Math.min(viewStart,max);
+ updateRange();
+}
+function updateRange(){
+ if(!samples)return;
+ const t0=1000*viewStart/sampleRate,t1=1000*Math.min(samples.length,viewStart+visibleCount())/sampleRate;
+ $("rangeText").textContent=t0.toFixed(3)+" ～ "+t1.toFixed(3)+" ms";
+}
+$("record").onclick=startRecording;$("stop").onclick=stopRecording;
+$("peak").onclick=()=>{centerOnPeak();updatePosition();draw()};
+$("position").oninput=()=>{viewStart=+$("position").value;updateRange();draw()};
+document.querySelectorAll(".window").forEach(btn=>btn.onclick=()=>{
+ document.querySelectorAll(".window").forEach(b=>b.classList.remove("active"));btn.classList.add("active");
+ if(samples){
+  const oldCenter=viewStart+visibleCount()/2;
+  viewMs=+btn.dataset.ms;
+  const n=visibleCount();
+  viewStart=Math.max(0,Math.min(Math.max(0,samples.length-n),Math.round(oldCenter-n/2)));
+  updatePosition();draw();
+ }else viewMs=+btn.dataset.ms;
+});
+$("clear").onclick=()=>{A=B=null;updateMeasure();draw()};
+$("L").oninput=updateMeasure;
+$("T").oninput=updateMeasure;
+$("reset").onclick=()=>{samples=null;A=B=null;viewStart=0;peakIndex=0;$("duration").textContent="—";$("status").textContent="待機中";$("position").max=0;$("position").value=0;$("rangeText").textContent="—";updateMeasure();draw()};
+
+canvas.onclick=e=>{
+ if(!samples)return;
+ const r=canvas.getBoundingClientRect(),n=visibleCount();
+ let i=Math.round(viewStart+(e.clientX-r.left)/r.width*n);
+ i=Math.max(0,Math.min(samples.length-1,i));
+ if(A===null||B!==null){A=i;B=null}else{B=i;if(B<A)[A,B]=[B,A]}
+ updateMeasure();draw();
+};
+function updateMeasure(){
+ $("A").textContent=A===null||!sampleRate?"—":(1000*A/sampleRate).toFixed(5)+" ms";
+ $("B").textContent=B===null||!sampleRate?"—":(1000*B/sampleRate).toFixed(5)+" ms";
+ const temp=+$("T").value;
+ const theory=331.5+0.6*temp;
+ $("theory").textContent=theory.toFixed(1)+" m/s";
+ if(A===null||B===null||!sampleRate){
+  $("samples").textContent=$("delta").textContent=$("velocity").textContent=$("difference").textContent=$("percent").textContent="—";
+  return;
+ }
+ const n=B-A;
+ const dt=n/sampleRate;
+ const L=+$("L").value/100;
+ const v=2*L/dt;
+ const diff=v-theory;
+ const pct=diff/theory*100;
+ $("samples").textContent=n+" samples";
+ $("delta").textContent=(1000*dt).toFixed(5)+" ms";
+ $("velocity").textContent=v.toFixed(2)+" m/s";
+ $("difference").textContent=(diff>=0?"+":"")+diff.toFixed(2)+" m/s";
+ $("percent").textContent=(pct>=0?"+":"")+pct.toFixed(2)+" %";
+}
+function draw(){
+ const W=canvas.clientWidth||1000,H=500;
+ ctx.clearRect(0,0,W,H);ctx.fillStyle="#fff";ctx.fillRect(0,0,W,H);
+ ctx.strokeStyle="#aeb5bf";ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,H/2);ctx.lineTo(W,H/2);ctx.stroke();
+ if(!samples){ctx.fillStyle="#707887";ctx.font="16px system-ui";ctx.fillText("録音後、ここに波形を表示します。",20,32);return}
+ const n=visibleCount(),end=Math.min(samples.length,viewStart+n);
+ // Auto-scale using a robust high percentile, so one clipped spike does not crush the rest.
+ let abs=[];
+ const stride=Math.max(1,Math.floor((end-viewStart)/6000));
+ for(let i=viewStart;i<end;i+=stride)abs.push(Math.abs(samples[i]));
+ abs.sort((a,b)=>a-b);
+ let scale=abs[Math.floor(abs.length*.995)]||1e-6;
+ scale=Math.max(scale,1e-6);
+ // 1 ms grid
+ const t0=1000*viewStart/sampleRate,t1=1000*end/sampleRate;
+ ctx.font="11px system-ui";
+ for(let t=Math.ceil(t0);t<=t1;t++){
+  const x=(t-t0)/(t1-t0)*W;
+  ctx.strokeStyle="#e2e6eb";ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();
+  ctx.fillStyle="#6c7480";ctx.fillText(t.toFixed(0)+" ms",x+3,H-8);
+ }
+ // True sample-connected polyline when zoomed enough.
+ const spp=(end-viewStart)/W;
+ ctx.strokeStyle="#111827";ctx.lineWidth=1;ctx.beginPath();
+ if(spp<=2){
+  let first=true;
+  for(let i=viewStart;i<end;i++){
+   const x=(i-viewStart)/(end-viewStart)*W;
+   const y=H/2-Math.max(-1,Math.min(1,samples[i]/scale))*H*.43;
+   if(first){ctx.moveTo(x,y);first=false}else ctx.lineTo(x,y);
+  }
+ }else{
+  // At wider views, plot RMS/mean-style decimated line rather than min-max vertical bars.
+  let first=true;
+  for(let px=0;px<W;px++){
+   const a=Math.floor(viewStart+px*spp),b=Math.min(end,Math.max(a+1,Math.floor(viewStart+(px+1)*spp)));
+   let sum=0;for(let i=a;i<b;i++)sum+=samples[i];
+   const v=sum/(b-a),y=H/2-Math.max(-1,Math.min(1,v/scale))*H*.43;
+   if(first){ctx.moveTo(px,y);first=false}else ctx.lineTo(px,y);
+  }
+ }
+ ctx.stroke();
+ function marker(i,label,color){
+  if(i===null||i<viewStart||i>end)return;
+  const x=(i-viewStart)/(end-viewStart)*W;
+  ctx.strokeStyle=color;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();
+  ctx.fillStyle=color;ctx.font="bold 16px system-ui";ctx.fillText(label,x+5,20);
+ }
+ marker(A,"A","#b42318");marker(B,"B","#175cd3");ctx.lineWidth=1;
+}
+
+let measurements=[];
+
+function currentMeasurement(){
+ if(A===null||B===null||!sampleRate)return null;
+ const N=B-A,dt=N/sampleRate,L=+$("L").value,T=+$("T").value;
+ if(N<=0||L<=0)return null;
+ return {L,T,N,dt,v:2*(L/100)/dt};
+}
+function renderMeasurements(){
+ const body=$("measurementBody"); body.innerHTML="";
+ measurements.forEach((r,i)=>{
+  const sameBefore=measurements.slice(0,i+1).filter(x=>x.L===r.L).length;
+  const tr=document.createElement("tr");
+  tr.innerHTML=`<td>${i+1}</td><td>${r.L.toFixed(1)} cm</td><td>${sameBefore}</td><td>${r.T.toFixed(1)} ℃</td><td>${r.N}</td><td>${(r.dt*1000).toFixed(5)} ms</td><td>${r.v.toFixed(2)} m/s</td>`;
+  body.appendChild(tr);
+ });
+ $("progress").textContent=measurements.length+" / 12";
+ const sb=$("summaryBody");sb.innerHTML="";
+ [50,60,70,80].forEach(L=>{
+  const a=measurements.filter(r=>Math.abs(r.L-L)<0.001);
+  let dt="—",av="—",sd="—";
+  if(a.length){
+   const md=a.reduce((z,r)=>z+r.dt,0)/a.length;
+   const mv=a.reduce((z,r)=>z+r.v,0)/a.length;
+   dt=(md*1000).toFixed(5)+" ms"; av=mv.toFixed(2)+" m/s";
+   if(a.length>1){
+    const ss=Math.sqrt(a.reduce((z,r)=>z+(r.v-mv)**2,0)/(a.length-1));
+    sd=ss.toFixed(2)+" m/s";
+   }
+  }
+  const tr=document.createElement("tr");
+  tr.innerHTML=`<td>${L} cm</td><td>${a.length} / 3</td><td>${dt}</td><td>${av}</td><td>${sd}</td>`;sb.appendChild(tr);
+ });
+}
+$("saveMeasurement").onclick=()=>{
+ const r=currentMeasurement();
+ if(!r){alert("先に波形上でA（直接音）とB（反射音）を指定してください。");return}
+ const allowed=[50,60,70,80];
+ if(!allowed.some(x=>Math.abs(r.L-x)<0.001)){
+  if(!confirm(`現在の気柱長は ${r.L} cm です。50・60・70・80 cm以外ですが記録しますか？`))return;
+ }
+ const count=measurements.filter(x=>Math.abs(x.L-r.L)<0.001).length;
+ if(count>=3 && !confirm(`${r.L} cmはすでに3回記録されています。追加しますか？`))return;
+ measurements.push(r);renderMeasurements();
+};
+$("undoMeasurement").onclick=()=>{measurements.pop();renderMeasurements()};
+$("clearMeasurements").onclick=()=>{if(confirm("記録した測定データをすべて消去しますか？")){measurements=[];renderMeasurements()}};
+$("downloadCsv").onclick=()=>{
+ if(!measurements.length){alert("記録データがありません。");return}
+ const rows=[["No","L_cm","trial","temperature_C","sample_difference","delta_t_ms","velocity_m_s"]];
+ const counts={};
+ measurements.forEach((r,i)=>{counts[r.L]=(counts[r.L]||0)+1;rows.push([i+1,r.L.toFixed(1),counts[r.L],r.T.toFixed(1),r.N,(r.dt*1000).toFixed(5),r.v.toFixed(3)])});
+ const blob=new Blob(["\ufeff"+rows.map(r=>r.join(",")).join("\r\n")],{type:"text/csv;charset=utf-8"});
+ const u=URL.createObjectURL(blob),a=document.createElement("a");a.href=u;a.download="preliminary_echo_measurements.csv";a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);
+};
+renderMeasurements();
+
+resize();updateMeasure();
+</script>
+</body></html>
